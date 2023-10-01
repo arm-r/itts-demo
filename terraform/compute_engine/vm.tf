@@ -1,46 +1,100 @@
-resource "google_service_account" "default" {
-  account_id   = "service_account_id"
-  display_name = "Service Account"
+//----------------------------------- VM Instance Vars -----------------------------------//
+
+variable "google_project" {
+  default     = "project-arz"
 }
 
-resource "google_compute_instance" "default" {
-  name         = "test"
-  machine_type = "e2-medium"
-  zone         = "us-central1-a"
+variable "google_region" {
+  default     = "asia-southeast2"
+}
 
-  tags = ["foo", "bar"]
+variable "network_name" {
+  default     = "workshop"
+}
 
+variable "subnetwork_name" {
+  default     = "subnet-01"
+}
+
+variable "server_machine_type" {
+  default     = "n2-standard-2"
+}
+
+variable "server_startup_script_master" {  
+  default     = <<EOF
+  apt update
+  apt install apache2 -y
+  echo "Hello World - Workshop ITTS" > /var/www/html/index.html  
+  EOF
+}
+
+variable "service_server_scopes" {
+  default     = "cloud-platform"
+}
+
+variable "server_ip" {
+  default     = "server-ip"
+}
+
+variable "server_name" {
+  default     = "server-01"
+}
+
+variable "zone" {
+  default     = "asia-southeast2-b"
+}
+
+//----------------------------------- VM Configuration -----------------------------------//
+
+terraform {
+  backend "gcs" {
+    bucket  = "workshop-terraform-state"
+    prefix  = "global/server"
+  }
+}
+
+provider "google" {
+  alias       = "google-vminstance"
+  project     = var.google_project
+  region      = var.google_region
+}
+
+resource "google_compute_address" "server_ip" {
+  name         = var.server_ip
+  subnetwork   = var.subnetwork_name
+  address_type = "INTERNAL"
+  address      = "10.1.1.17"
+  region       = var.google_region
+}
+
+resource "google_compute_address" "server_ext_ip" {
+  name    = "server-ext-ip"
+  region  = var.google_region
+}
+
+resource "google_compute_instance" "server" {
+  name            = var.server_name
+  machine_type    = var.server_machine_type
+  zone            = var.zone
+  can_ip_forward  = true
+  tags            = ["server-firewall"]
   boot_disk {
     initialize_params {
-      image = "debian-cloud/debian-11"
-      labels = {
-        my_label = "value"
-      }
+      image = "ubuntu-os-cloud/ubuntu-2004-lts"
     }
   }
-
-  // Local SSD disk
-  scratch_disk {
-    interface = "SCSI"
-  }
-
   network_interface {
-    network = "default"
-
+    network       = var.network_name
     access_config {
-      // Ephemeral public IP
+      nat_ip = google_compute_address.server_ext_ip.address
     }
+    subnetwork    = var.subnetwork_name
+    network_ip    = google_compute_address.server_ip.self_link
   }
-
-  metadata = {
-    foo = "bar"
-  }
-
-  metadata_startup_script = "echo hi > /test.txt"
-
+  metadata_startup_script = var.server_startup_script_master
   service_account {
-    # Google recommends custom service accounts that have cloud-platform scope and permissions granted via IAM Roles.
-    email  = google_service_account.default.email
-    scopes = ["cloud-platform"]
+    scopes = [var.service_server_scopes]
   }
 }
+
+//----------------------------------- END -----------------------------------//
